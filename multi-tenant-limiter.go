@@ -13,12 +13,12 @@ type MultiLimiter struct {
 }
 
 type singleLimiter struct {
-	chunk     int
+	chunk     int // size of increase
 	limitChan chan struct{}
 }
 
-// NewMultiLimiter returns the MultiLimiter object similar to RateLimiter object. Calls and Bust control the limiter: calls is
-// the number of calls to limit, and burst is the allowed busts (it fills up over the unused calls).
+// NewMultiLimiter returns the MultiLimiter object similar to RateLimiter object. Calls and Burst control the limiter: calls is
+// the number of calls to limit, and burst is the allowed burst (it fills up over the unused calls).
 // The timeFrame allows to specify over what period the calls are spread and tolerance is a %
 // of extra calls to be tolerated. Eg. tolerance of 5% would allow 105% calls per timeFrame.
 // To use the MultiLimiter, you need to initialize Tenant. The allowed calls are filled up for all tenants peridically,
@@ -28,19 +28,17 @@ func NewMultiLimiter(calls, burst int, timeFrame time.Duration, tolerance float6
 	if calls < 1 {
 		panic("RateLimiter need positive number of calls")
 	}
-
 	if burst < 0 {
 		burst = 0
 	}
 
+	// setup the configuration
 	rate := time.Duration(float64(timeFrame) / (float64(calls) * (1 + tolerance)))
-
 	tick := time.NewTicker(rate)
-
 	cChan := make(chan struct{})
-
 	limitChanMap := make(map[string]*singleLimiter)
 
+	// prepare the object to be returned
 	ml := &MultiLimiter{
 		mu:           &sync.RWMutex{},
 		limitChanMap: limitChanMap,
@@ -48,6 +46,7 @@ func NewMultiLimiter(calls, burst int, timeFrame time.Duration, tolerance float6
 		cancelChan:   cChan,
 	}
 
+	// run the background fillup
 	go func(mLimiter *MultiLimiter) {
 		for {
 			select {
@@ -57,7 +56,6 @@ func NewMultiLimiter(calls, burst int, timeFrame time.Duration, tolerance float6
 					v.incTenant()
 				}
 				mLimiter.mu.RUnlock()
-
 			case <-cChan:
 				return
 			default:
@@ -68,6 +66,7 @@ func NewMultiLimiter(calls, burst int, timeFrame time.Duration, tolerance float6
 	return ml
 }
 
+// Wait is the rate limiting call, use it to 'consume' limit
 func (mrl *MultiLimiter) Wait(tenantID string) bool {
 	mrl.mu.RLock()
 	defer mrl.mu.RUnlock()
@@ -81,6 +80,17 @@ func (mrl *MultiLimiter) Wait(tenantID string) bool {
 	return true
 }
 
+// HasTenant checks if such tenant is set up
+func (mrl *MultiLimiter) HasTenant(tenantID string) bool {
+	_, ok := mrl.limitChanMap[tenantID]
+	if !ok {
+		return false
+	}
+	return true
+}
+
+// AddTenant adds a tenant with a config.
+// It also updates a tenant limits with a new config if it exist.
 func (mrl *MultiLimiter) AddTenant(tenantID string, burst, chunk int) {
 	mrl.mu.Lock()
 	defer mrl.mu.Unlock()
@@ -88,7 +98,6 @@ func (mrl *MultiLimiter) AddTenant(tenantID string, burst, chunk int) {
 	slOld, ok := mrl.limitChanMap[tenantID]
 	if ok {
 		slOld.chunk = chunk
-
 		newChan := make(chan struct{}, burst)
 		close(slOld.limitChan)
 

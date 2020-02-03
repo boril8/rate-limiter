@@ -13,7 +13,6 @@ func TestMultiLimiter(t *testing.T) {
 
 	t0 := time.Now()
 
-	// run the Fib function b.N times
 	for n := 0; n < 20; n++ {
 		rl.Wait("tenant1")
 	}
@@ -31,7 +30,6 @@ func BenchmarkMultiLimiter(b *testing.B) {
 
 	b.N = 100
 
-	// run the Fib function b.N times
 	for n := 0; n < b.N; n++ {
 		rl.Wait("tenant1")
 	}
